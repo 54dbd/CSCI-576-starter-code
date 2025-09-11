@@ -106,7 +106,7 @@ Build and Run
 	- In the /build folder, you will find the executable (MyImageApplication).
 	- To run this, navigate to the build folder in a terminal and run the executable file.
 	- The given starter code takes exactly one argument - a file path to a 512x512 rgb image file
-	- This should be invoked as ./MyImageApplication '<path to rgb file>'
+- This should be invoked as ./MyImageApplication '<path to rgb file>'
 	- Example - ./MyImageApplication '../../Lena_512_512.rgb'
 
 9. Rebuilds

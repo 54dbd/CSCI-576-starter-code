@@ -94,8 +94,8 @@ MyFrame::MyFrame(const wxString &title, string imagePath)
 
   // Set up the scrolled window as a child of this frame
   scrolledWindow = new wxScrolledWindow(this, wxID_ANY);
-  scrolledWindow->SetScrollbars(10, 10, width, height);
-  scrolledWindow->SetVirtualSize(width, height);
+  scrolledWindow->SetScrollbars(10, 10, width*2, height);
+  scrolledWindow->SetVirtualSize(width*2, height);
 
   // Bind the paint event to the OnPaint function of the scrolled window
   scrolledWindow->Bind(wxEVT_PAINT, &MyFrame::OnPaint, this);
