@@ -72,21 +72,51 @@ endif()
 
 # parse the .so version from build/bakefiles/version.bkl
 file(READ "${wxSOURCE_DIR}/build/bakefiles/version.bkl" WX_VERSION_BKL_CONTENTS)
-string(REGEX MATCH "WX_CURRENT.>([0-9]+)"
-    WX_CURRENT ${WX_VERSION_BKL_CONTENTS})
-string(REGEX MATCH "([0-9]+)"
-    WX_CURRENT ${WX_CURRENT})
-string(REGEX MATCH "WX_REVISION.>([0-9]+)"
-    WX_REVISION ${WX_VERSION_BKL_CONTENTS})
-string(REGEX MATCH "([0-9]+)"
-    WX_REVISION ${WX_REVISION})
-string(REGEX MATCH "WX_AGE.>([0-9]+)"
-    WX_AGE ${WX_VERSION_BKL_CONTENTS})
-string(REGEX MATCH "([0-9]+)"
-    WX_AGE ${WX_AGE})
-math(EXPR wxSOVERSION_MAJOR "${WX_CURRENT} - ${WX_AGE}")
-set(wxSOVERSION ${wxSOVERSION_MAJOR}.${WX_AGE}.${WX_REVISION})
 
+# --- robust regex: accept any non-digit separator between name and number ---
+string(REGEX MATCH "WX_CURRENT[^0-9]*([0-9]+)" _match_current "${WX_VERSION_BKL_CONTENTS}")
+if(_match_current)
+  set(WX_CURRENT "${CMAKE_MATCH_1}")
+else()
+  message(WARNING "Failed to parse WX_CURRENT from ${wxSOURCE_DIR}/build/bakefiles/version.bkl. Defaulting WX_CURRENT=0")
+  set(WX_CURRENT "0")
+endif()
+
+string(REGEX MATCH "WX_REVISION[^0-9]*([0-9]+)" _match_revision "${WX_VERSION_BKL_CONTENTS}")
+if(_match_revision)
+  set(WX_REVISION "${CMAKE_MATCH_1}")
+else()
+  message(WARNING "Failed to parse WX_REVISION from ${wxSOURCE_DIR}/build/bakefiles/version.bkl. Defaulting WX_REVISION=0")
+  set(WX_REVISION "0")
+endif()
+
+string(REGEX MATCH "WX_AGE[^0-9]*([0-9]+)" _match_age "${WX_VERSION_BKL_CONTENTS}")
+if(_match_age)
+  set(WX_AGE "${CMAKE_MATCH_1}")
+else()
+  message(WARNING "Failed to parse WX_AGE from ${wxSOURCE_DIR}/build/bakefiles/version.bkl. Defaulting WX_AGE=0")
+  set(WX_AGE "0")
+endif()
+
+# debug: print parsed values to confirm
+message(STATUS "Parsed from version.bkl: WX_CURRENT='${WX_CURRENT}' WX_AGE='${WX_AGE}' WX_REVISION='${WX_REVISION}'")
+
+# Extra safety: strip any non-digit just in case (should be unnecessary after above, but harmless)
+string(REGEX REPLACE "[^0-9]" "" WX_CURRENT "${WX_CURRENT}")
+string(REGEX REPLACE "[^0-9]" "" WX_AGE "${WX_AGE}")
+string(REGEX REPLACE "[^0-9]" "" WX_REVISION "${WX_REVISION}")
+
+# final check before math
+if(WX_CURRENT STREQUAL "" OR WX_AGE STREQUAL "")
+  message(FATAL_ERROR "WX_CURRENT or WX_AGE is empty after parsing. Can't compute wxSOVERSION_MAJOR. Dumping file contents for debugging:\n${WX_VERSION_BKL_CONTENTS}")
+endif()
+
+math(EXPR wxSOVERSION_MAJOR "${WX_CURRENT} - ${WX_AGE}")
+set(wxSOVERSION "${wxSOVERSION_MAJOR}.${WX_AGE}.${WX_REVISION}")
+
+message(STATUS "Computed wxSOVERSION = ${wxSOVERSION}")
+
+# preserve your existing version/copyright lines
 set(wxVERSION ${wxMAJOR_VERSION}.${wxMINOR_VERSION}.${wxRELEASE_NUMBER})
 set(wxCOPYRIGHT "2002-2023 wxWidgets")
 

@@ -3,16 +3,11 @@ cmake_minimum_required(VERSION 4.0)
 project(ImageDisplay)
 
 set(CMAKE_CXX_STANDARD 17)
-set(WX_DOMAIN ./dependency/wxWidgets/include/wx)
 
-include_directories(${WX_DOMAIN})
 # Add source files
 set(SOURCES
     src/Main.cpp
     manifest/MyImageApplication.rc
-    ${WX_DOMAIN}/wx.h
-    ${WX_DOMAIN}/dcbuffer.h
-
 )
 
 
