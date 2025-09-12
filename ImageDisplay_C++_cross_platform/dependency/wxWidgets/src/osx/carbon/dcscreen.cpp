@@ -69,14 +69,19 @@ wxBitmap wxScreenDCImpl::DoGetAsBitmap(const wxRect *subrect) const
         srcRect = CGRectOffset( srcRect, -subrect->x, -subrect->y ) ;
 
     CGImageRef image = nullptr;
-    
-    image = CGDisplayCreateImage(kCGDirectMainDisplay);
 
-    wxASSERT_MSG(image, wxT("wxScreenDC::GetAsBitmap - unable to get screenshot."));
+    #if defined(__MAC_OS_X_VERSION_MAX_ALLOWED) && __MAC_OS_X_VERSION_MAX_ALLOWED >= 150000
+        // CGDisplayCreateImage is unavailable in macOS 15.0 and later.
+        wxFAIL_MSG("wxScreenDC::GetAsBitmap - CGDisplayCreateImage is unavailable in macOS 15.0 and later. Please use ScreenCaptureKit.");
+    #else
+        image = CGDisplayCreateImage(kCGDirectMainDisplay);
 
-    CGContextDrawImage(context, srcRect, image);
+        wxASSERT_MSG(image, wxT("wxScreenDC::GetAsBitmap - unable to get screenshot."));
 
-    CGImageRelease(image);
+        CGContextDrawImage(context, srcRect, image);
+
+        CGImageRelease(image);
+    #endif
 
     CGContextRestoreGState(context);
 #else

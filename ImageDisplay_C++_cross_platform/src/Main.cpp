@@ -1,3 +1,4 @@
+#include <cmath>
 #include <wx/wx.h>
 #include <wx/dcbuffer.h>
 #include <filesystem>
@@ -5,7 +6,7 @@
 #include <fstream>
 #include <string>
 #include <vector>
-#define DEBUG 1 
+#define DEBUG 1
 using namespace std;
 namespace fs = std::filesystem;
 
@@ -44,10 +45,11 @@ class MyFrame : public wxFrame {
 
 /** Utility function to read image data */
 unsigned char *readImageData(string imagePath, int width, int height);
-
+double *from256to1(unsigned char * imageData, int width, int height);
+unsigned char *from1to256(double * imageData, int width, int height);
 unsigned char *quantize(unsigned char * imageData, int width, int height,int C, int M, int Q1, int Q2, int Q3);
-unsigned char *RGB2YUV(unsigned char * imageData, int width, int height);
-unsigned char *YUV2RGB(unsigned char * imageData, int width, int height);
+double *RGB2YUV(unsigned char * imageData, int width, int height);
+unsigned char *YUV2RGB(double * imageData, int width, int height);
 void saveToPngFile(string filePath, unsigned char *data, int width, int height);
 void saveToRgbFile(string filePath, unsigned char *data, int width, int height);
 void testCases();
@@ -123,7 +125,7 @@ MyFrame::MyFrame(const wxString &title, string imagePath, int C, int M, int Q1, 
     exit(0);
   }
       
-  if(C == 1 | C == 2){\
+  if(C == 1 | C == 2){
     outData = quantize(inData, width, height, C, M, Q1, Q2, Q3);
 
   }else{
@@ -178,25 +180,88 @@ double* matrixMultiply(
 
     double* C = new double[hA * wB];
 
+    #if DEBUG
+      // cout << "Parameters: hA:" << hA << " wA:" << wA << " hB:" << hB << " wB:" << wB << endl; 
+      // for (int i = 0; i < hA; i++) {
+          // for (int j = 0; j < wA; j++) {
+              // cout << A[i * wA + j] << " ";
+          // }
+          // cout << endl;
+      // }
+    #endif
     for (int i = 0; i < hA; i++) {
         for (int j = 0; j < wB; j++) {
-            int sum = 0;
+            double sum = 0;
             for (int k = 0; k < wA; k++) {
-                int a = A[i * wA + k];
-                int b = B[k * wB + j];
+                double a = A[i * wA + k];
+                double b = B[k * wB + j];
+                #if DEBUG
+                  // if (i == 0 && j < 10) {
+                  //     cout << "A[0][" << k << "] = " << a << ", B[" << k << "][" << j << "] = " << b << endl;
+                  // }
+                #endif
                 sum += a * b;
             }
+            #if DEBUG
+              // if(sum > 255) {
+              //     cout << "pixel value overflow: " << sum << endl;
+              // }else if (sum < 0){
+              //     cout << "pixel value underflow: " << sum << endl;
+              // }
+            #endif
             // if (sum > 255) sum = 255;
             // if (sum < 0) sum = 0;
             C[i * wB + j] = static_cast<double>(sum);
             #if DEBUG
-              if (i == 0 && j < 10) {
-                  cout << "C[0][" << j << "] = " << C[i * wB + j] << endl;
-              }
+              // if (i == 0 && j < 10) {
+              //     cout << "C[0][" << j << "] = " << C[i * wB + j] << endl;
+              // }
             #endif
         }
     }
     return C;
+}
+
+double *from256to1(unsigned char * imageData, int width, int height){
+    double *outData =
+      (double *)malloc(width * height * 3 * sizeof(double));
+    if (!outData) return NULL;
+    #if DEBUG
+      cout << "Converting from [0,255] to [0,1]" << endl;
+    #endif
+    for (int i = 0; i < height * width; i++) {
+        outData[3*i] = (double)imageData[3*i] / 255.0;
+        outData[3*i+1] = (double)imageData[3*i] / 255.0;
+        outData[3*i+2] = (double)imageData[3*i] / 255.0;
+    }
+    #if DEBUG
+      for (int i = 0; i < 10; i++) {
+          cout << "Pixel " << i << ": " << (int)imageData[3*i] << " -> " << (double)outData[3*i] << endl;
+      }
+    #endif
+    
+    return outData;
+}
+
+unsigned char *from1to256(double * imageData, int width, int height){
+    unsigned char *outData =
+      (unsigned char *)malloc(width * height * 3 * sizeof(unsigned char));
+    if (!outData) return NULL;
+    #if DEBUG
+      cout << "Converting from [0,1] to [0,255]" << endl;
+    #endif
+    for (int i = 0; i < height * width; i++) {
+        if(imageData[3*i] > 2){
+          #if DEBUG
+            cout << "Error: pixel value greater than 1: " << (int)imageData[3*i] << endl;
+          #endif
+          return NULL;
+        } 
+        outData[3*i] = (int)(imageData[3*i] * 255);
+        outData[3*i+1] = (int)(imageData[3*i] * 255);
+        outData[3*i+2] = (int)(imageData[3*i] * 255);
+    }
+    return outData;
 }
 
 unsigned char *rgbrgbrgb2rrggbb(unsigned char * imageData, int width, int height){
@@ -223,10 +288,20 @@ unsigned char *rrggbb2rgbrgbrgb(unsigned char * imageData, int width, int height
     return outData;
 }
 
-unsigned char *RGB2YUV(unsigned char * imageData, int width, int height) {
+double *RGB2YUV(unsigned char * imageData, int width, int height) {
   unsigned char *outData =
       (unsigned char *)malloc(width * height * 3 * sizeof(unsigned char));
   if (!outData) return NULL;
+  #if DEBUG
+    cout << "Converting from RGB to YUV" << endl;
+  #endif
+  double *outDataDouble =
+      (double *)malloc(width * height * 3 * sizeof(double));
+  if (!outDataDouble) return NULL;
+  
+  double *imageDataDouble =
+      (double *)malloc(width * height * 3 * sizeof(double));
+  if (!imageDataDouble) return NULL;
 
   
 
@@ -236,12 +311,14 @@ unsigned char *RGB2YUV(unsigned char * imageData, int width, int height) {
       0.615, -0.515, -0.100
   };
 
+  imageDataDouble = from256to1(imageData, width, height);
+
   for (int i = 0; i < height * width; i++) {
     // We populate YUV values of each pixel in that order
     // YUV.YUV.YUV and so on for all pixels
-    double r = imageData[3*i];
-    double g = imageData[3*i + 1];
-    double b = imageData[3*i + 2];
+    double r = imageDataDouble[3*i];
+    double g = imageDataDouble[3*i + 1];
+    double b = imageDataDouble[3*i + 2];
     double *yuv = matrixMultiply(RGB2YUVMatrix, 3, 3, (double[]){r, g, b}, 3, 1);
     #if DEBUG
       if (i < 10) {
@@ -249,22 +326,35 @@ unsigned char *RGB2YUV(unsigned char * imageData, int width, int height) {
                << " => Y=" << yuv[0] << " U=" << yuv[1] << " V=" << yuv[2] << endl;
       }
     #endif
-    outData[3 * i] = yuv[0];
-    outData[3 * i + 1] = yuv[1];
-    outData[3 * i + 2] = yuv[2];
+    outDataDouble[3 * i] = yuv[0];
+    outDataDouble[3 * i + 1] = yuv[1];
+    outDataDouble[3 * i + 2] = yuv[2];
     delete[] yuv;
     
   }
-
-  return outData;
+  // outData = from1to256(outDataDouble, width, height);
+  // delete [] imageDataDouble;
+  // delete [] outDataDouble;
+  return outDataDouble;
   
 }
 
-unsigned char *YUV2RGB(unsigned char * imageData, int width, int height) {
+unsigned char *YUV2RGB(double * imageData, int width, int height) {
   unsigned char *outData =
       (unsigned char *)malloc(width * height * 3 * sizeof(unsigned char));
   if (!outData) return NULL;
 
+  double *outDataDouble =
+      (double *)malloc(width * height * 3 * sizeof(double));
+  if (!outDataDouble) return NULL;
+  
+  // double *imageDataDouble =
+  //     (double *)malloc(width * height * 3 * sizeof(double));
+  // if (!imageDataDouble) return NULL;
+  #if DEBUG
+    cout << "Converting from YUV to RGB" << endl;
+  #endif
+  // imageDataDouble = from256to1(imageData, width, height);
   double YUV2RGBMatrix[] = {
       1.0, 0.0, 1.1398,
       1.0, -0.3946, -0.5806,
@@ -277,13 +367,17 @@ unsigned char *YUV2RGB(unsigned char * imageData, int width, int height) {
     double u = imageData[3*i + 1];
     double v = imageData[3*i + 2];
     double *rgb = matrixMultiply(YUV2RGBMatrix, 3, 3, (double[]){y, u, v}, 3, 1);
-    outData[3 * i] = rgb[0];
-    outData[3 * i + 1] = rgb[1];
-    outData[3 * i + 2] = rgb[2];
+    outDataDouble[3 * i] = rgb[0];
+    outDataDouble[3 * i + 1] = rgb[1];
+    outDataDouble[3 * i + 2] = rgb[2];
     delete[] rgb;
     
   }
+  outData = from1to256(outDataDouble, width, height);
+  // delete [] imageDataDouble;
+  // delete [] outDataDouble;
 
+  
   return outData;
   
 }
@@ -351,14 +445,70 @@ unsigned char *nonUniformQuantize(unsigned char* imageData, int width, int heigh
 unsigned char *quantize(unsigned char * imageData, int width, int height, int C, int M, int Q1, int Q2, int Q3) {
   unsigned char *outData = (unsigned char *)malloc(width * height * 3);
     if (!outData) return NULL;
+    
+    double *imageDataDouble =
+      (double *)malloc(width * height * 3 * sizeof(double));
+    if (!imageDataDouble) return NULL;
+
+    double *outDataDouble =
+      (double *)malloc(width * height * 3 * sizeof(double));
+    if (!outDataDouble) return NULL;
 
     if (C == 2){
-      outData = RGB2YUV(imageData, width, height);
-      return outData;
+      imageDataDouble = RGB2YUV(imageData, width, height);
+      if (M == 1){
+        const int YRange = 1 << Q1;  // N_Y
+        const int URange = 1 << Q2;  // N_U
+        const int VRange = 1 << Q3;  // N_V
 
-    }
+        const double Ya = 0.0,     Yb = 1.0;      
+        const double Ua = -0.436,  Ub = 0.436;   
+        const double Va = -0.615,  Vb = 0.615; 
 
-    if (M == 1){
+        const double Y_span = Yb - Ya;
+        const double U_span = Ub - Ua;
+        const double V_span = Vb - Va;
+
+        for (int i = 0; i < width * height; ++i) {
+            double y = imageDataDouble[3*i];
+            double u = imageDataDouble[3*i+1];
+            double v = imageDataDouble[3*i+2];
+
+            // ---- Y ----
+            int yLevel = (int)floor((y - Ya) / Y_span * YRange);
+            if (yLevel < 0) yLevel = 0;
+            else if (yLevel >= YRange) yLevel = YRange - 1;
+            double yInterval = Y_span / YRange;
+            double yq = Ya + (yLevel + 0.5) * yInterval;
+
+            // ---- U ----
+            int uLevel = (int)floor((u - Ua) / U_span * URange);
+            if (uLevel < 0) uLevel = 0;
+            else if (uLevel >= URange) uLevel = URange - 1;
+            double uInterval = U_span / URange;
+            double uq = Ua + (uLevel + 0.5) * uInterval;
+
+            // ---- V ----
+            int vLevel = (int)floor((v - Va) / V_span * VRange);
+            if (vLevel < 0) vLevel = 0;
+            else if (vLevel >= VRange) vLevel = VRange - 1;
+            double vInterval = V_span / VRange;
+            double vq = Va + (vLevel + 0.5) * vInterval;
+
+            outDataDouble[3*i]   = yq;
+            outDataDouble[3*i+1] = uq;
+            outDataDouble[3*i+2] = vq;
+        }  
+      } else if (M == 2){
+        outData = nonUniformQuantize(imageData, width, height, Q1, Q2, Q3);
+      }else{
+        free(outData);
+        return NULL;
+      }
+      outData = YUV2RGB(outDataDouble, width, height);
+
+    }else{
+      if (M == 1){
       unsigned int RRange = 1 << Q1;
       unsigned int GRange = 1 << Q2;
       unsigned int BRange = 1 << Q3;
@@ -381,15 +531,20 @@ unsigned char *quantize(unsigned char * imageData, int width, int height, int C,
           outData[3*i+2] = bLevel * bInterval + bInterval / 2;
       }
 
-      return outData;
+      
+      
 
-    } else if (M == 2){
-      outData = nonUniformQuantize(imageData, width, height, Q1, Q2, Q3);
-      return outData;
-    }else{
-      free(outData);
-      return NULL;
+      } else if (M == 2){
+        outData = nonUniformQuantize(imageData, width, height, Q1, Q2, Q3);
+        
+        
+      }else{
+        free(outData);
+        return NULL;
+      }
     }
+
+    return outData;
   
 }
 
