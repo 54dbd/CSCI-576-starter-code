@@ -1,3 +1,4 @@
+#include <algorithm>
 #include <cmath>
 #include <filesystem>
 #include <fstream>
@@ -6,7 +7,7 @@
 #include <vector>
 #include <wx/dcbuffer.h>
 #include <wx/wx.h>
-#define DEBUG 1
+#define DEBUG 0
 using namespace std;
 namespace fs = std::filesystem;
 
@@ -188,45 +189,23 @@ double *matrixMultiply(double *A, int hA, int wA, double *B, int hB, int wB) {
 
   double *C = new double[hA * wB];
 
-#if DEBUG
-  // cout << "Parameters: hA:" << hA << " wA:" << wA << " hB:" << hB << " wB:"
-  // << wB << endl; for (int i = 0; i < hA; i++) { for (int j = 0; j < wA; j++)
-  // { cout << A[i * wA + j] << " ";
-  // }
-  // cout << endl;
-  // }
-#endif
+
   for (int i = 0; i < hA; i++) {
     for (int j = 0; j < wB; j++) {
       double sum = 0;
       for (int k = 0; k < wA; k++) {
         double a = A[i * wA + k];
         double b = B[k * wB + j];
-#if DEBUG
-        // if (i == 0 && j < 10) {
-        //     cout << "A[0][" << k << "] = " << a << ", B[" << k << "][" << j
-        //     << "] = " << b << endl;
-        // }
-#endif
+
         sum += a * b;
       }
-#if DEBUG
-      // if(sum > 255) {
-      //     cout << "pixel value overflow: " << sum << endl;
-      // }else if (sum < 0){
-      //     cout << "pixel value underflow: " << sum << endl;
-      // }
-#endif
-      // if (sum > 255) sum = 255;
-      // if (sum < 0) sum = 0;
       C[i * wB + j] = static_cast<double>(sum);
-#if DEBUG
-      // if (i == 0 && j < 10) {
-      //     cout << "C[0][" << j << "] = " << C[i * wB + j] << endl;
-      // }
-#endif
+
     }
   }
+#if DEBUG
+
+#endif
   return C;
 }
 
@@ -268,9 +247,16 @@ unsigned char *from1to255(double *imageData, int width, int height) {
 #endif
       return NULL;
     }
-    outData[3 * i] = (int)(imageData[3 * i] * 255);
-    outData[3 * i + 1] = (int)(imageData[3 * i + 1] * 255);
-    outData[3 * i + 2] = (int)(imageData[3 * i + 2] * 255);
+    // clamp to [0,1] before scaling to prevent wrap-around artifacts
+    double r = imageData[3 * i];
+    double g = imageData[3 * i + 1];
+    double b = imageData[3 * i + 2];
+    if (r < 0.0) r = 0.0; else if (r > 1.0) r = 1.0;
+    if (g < 0.0) g = 0.0; else if (g > 1.0) g = 1.0;
+    if (b < 0.0) b = 0.0; else if (b > 1.0) b = 1.0;
+    outData[3 * i] = (int)(r * 255.0);
+    outData[3 * i + 1] = (int)(g * 255.0);
+    outData[3 * i + 2] = (int)(b * 255.0);
   }
 #if DEBUG
   for (int i = 0; i < 10; i++) {
@@ -326,17 +312,38 @@ double *RGB2YUV(unsigned char *imageData, int width, int height) {
   if (!imageDataDouble)
     return NULL;
 
+  // BT.601 RGB to YUV conversion matrix
   double RGB2YUVMatrix[] = {0.299, 0.587, 0.114,  -0.147, -0.289,
                             0.436, 0.615, -0.515, -0.100};
 
   imageDataDouble = from255to1(imageData, width, height);
+#if DEBUG
+  double minY=1e9, maxY=-1e9, minU=1e9, maxU=-1e9, minV=1e9, maxV=-1e9;
+  for (int i=0;i<width*height;i++) {
+      minY = std::min(minY, imageDataDouble[3*i]);
+      maxY = std::max(maxY, imageDataDouble[3*i]);
+      minU = std::min(minU, imageDataDouble[3*i+1]);
+      maxU = std::max(maxU, imageDataDouble[3*i+1]);
+      minV = std::min(minV, imageDataDouble[3*i+2]);
+      maxV = std::max(maxV, imageDataDouble[3*i+2]);
+  }
+  cout << "Y:[" << minY << "," << maxY << "] "
+      << "U:[" << minU << "," << maxU << "] "
+      << "V:[" << minV << "," << maxV << "]" << endl;
 
+#endif
   for (int i = 0; i < height * width; i++) {
     // We populate YUV values of each pixel in that order
     // YUV.YUV.YUV and so on for all pixels
     double r = imageDataDouble[3 * i];
     double g = imageDataDouble[3 * i + 1];
     double b = imageDataDouble[3 * i + 2];
+    
+    // Ensure RGB values are in valid range [0,1]
+    if (r < 0.0) r = 0.0; else if (r > 1.0) r = 1.0;
+    if (g < 0.0) g = 0.0; else if (g > 1.0) g = 1.0;
+    if (b < 0.0) b = 0.0; else if (b > 1.0) b = 1.0;
+    
     double *yuv =
         matrixMultiply(RGB2YUVMatrix, 3, 3, (double[]){r, g, b}, 3, 1);
 #if DEBUG
@@ -350,6 +357,21 @@ double *RGB2YUV(unsigned char *imageData, int width, int height) {
     outDataDouble[3 * i + 2] = yuv[2];
     delete[] yuv;
   }
+#if DEBUG
+  minY=1e9, maxY=-1e9, minU=1e9, maxU=-1e9, minV=1e9, maxV=-1e9;
+  for (int i=0;i<width*height;i++) {
+      minY = std::min(minY, outDataDouble[3*i]);
+      maxY = std::max(maxY, outDataDouble[3*i]);
+      minU = std::min(minU, outDataDouble[3*i+1]);
+      maxU = std::max(maxU, outDataDouble[3*i+1]);
+      minV = std::min(minV, outDataDouble[3*i+2]);
+      maxV = std::max(maxV, outDataDouble[3*i+2]);
+  }
+  cout << "Y:[" << minY << "," << maxY << "] "
+      << "U:[" << minU << "," << maxU << "] "
+      << "V:[" << minV << "," << maxV << "]" << endl;
+
+#endif
   // outData = from1to256(outDataDouble, width, height);
   // delete [] imageDataDouble;
   // delete [] outDataDouble;
@@ -373,6 +395,7 @@ unsigned char *YUV2RGB(double *imageData, int width, int height) {
   cout << "Converting from YUV to RGB" << endl;
 #endif
   // imageDataDouble = from256to1(imageData, width, height);
+  // BT.601 YUV to RGB conversion matrix (inverse of RGB2YUV)
   double YUV2RGBMatrix[] = {1.0,     0.0, 1.1398, 1.0, -0.3946,
                             -0.5806, 1.0, 2.0321, 0.0};
   for (int i = 0; i < height * width; i++) {
@@ -382,11 +405,15 @@ unsigned char *YUV2RGB(double *imageData, int width, int height) {
     double y = imageData[3 * i];
     double u = imageData[3 * i + 1];
     double v = imageData[3 * i + 2];
+    
+    // Clamp YUV values to valid ranges to prevent artifacts
+    if (y < 0.0) y = 0.0; else if (y > 1.0) y = 1.0;
+    if (u < -0.436) u = -0.436; else if (u > 0.436) u = 0.436;
+    if (v < -0.615) v = -0.615; else if (v > 0.615) v = 0.615;
+    
 #if DEBUG
-    if (y > 2 || u > 2 || v > 2) {
-      cout << "Error: pixel value greater than 1: Y=" << y << " U=" << u
-           << " V=" << v << endl;
-      return NULL;
+    if (i < 10) {
+      cout << "[YUV2RGB] Clamped Y=" << y << " U=" << u << " V=" << v << endl;
     }
 #endif
 
@@ -399,9 +426,16 @@ unsigned char *YUV2RGB(double *imageData, int width, int height) {
     }
 #endif
 
-    outDataDouble[3 * i] = rgb[0];
-    outDataDouble[3 * i + 1] = rgb[1];
-    outDataDouble[3 * i + 2] = rgb[2];
+    // clamp RGB to [0,1] to avoid invalid values after inverse transform
+    double r = rgb[0];
+    double g = rgb[1];
+    double b = rgb[2];
+    if (r < 0.0) r = 0.0; else if (r > 1.0) r = 1.0;
+    if (g < 0.0) g = 0.0; else if (g > 1.0) g = 1.0;
+    if (b < 0.0) b = 0.0; else if (b > 1.0) b = 1.0;
+    outDataDouble[3 * i] = r;
+    outDataDouble[3 * i + 1] = g;
+    outDataDouble[3 * i + 2] = b;
     delete[] rgb;
   }
   outData = from1to255(outDataDouble, width, height);
@@ -471,39 +505,94 @@ double *nonUniformQuantizeYUV(const double *imageData, int width, int height,
     }
     cout << endl;
 #endif
-    // --- CDF ---
-    std::vector<int> cdf(H, 0);
-    cdf[0] = hist[0];
-    for (int i = 1; i < H; ++i)
-      cdf[i] = cdf[i - 1] + hist[i];
-
-    // --- 等概率边界（bin 索引） ---
+    // --- Lloyd-Max 标量量化（基于直方图） ---
     const int L = levels[c];
     std::vector<int> boundaryBin(L + 1, 0);
-    boundaryBin[0] = 0;
-    int curLevel = 1;
-    for (int i = 0; i < H && curLevel < L; ++i) {
-      // cdf[i] >= curLevel * size / L
-      if ((long long)cdf[i] * L >= (long long)curLevel * size) {
-        boundaryBin[curLevel++] = i;
-      }
-    }
-    boundaryBin[L] = H - 1;
-
-    // --- bin 边界 -> 实数边界（取bin中心） ---
-    std::vector<double> boundaries(L + 1, lo[c]);
-    for (int k = 0; k <= L; ++k) {
-      double t = (boundaryBin[k] + 0.5) / H; // [0,1)
-      boundaries[k] = lo[c] + t * span[c];
-    }
-
-    // --- 每个区间代表值（两边界中点） ---
     std::vector<double> rep(L, 0.0);
-    for (int k = 0; k < L; ++k) {
-      rep[k] = 0.5 * (boundaries[k] + boundaries[k + 1]);
+
+    // 初始化：等概率边界
+    {
+      std::vector<int> cdf(H, 0);
+      cdf[0] = hist[0];
+      for (int i = 1; i < H; ++i)
+        cdf[i] = cdf[i - 1] + hist[i];
+      boundaryBin[0] = 0;
+      int curLevel = 1;
+      for (int i = 0; i < H && curLevel < L; ++i) {
+        if ((long long)cdf[i] * L >= (long long)curLevel * size) {
+          boundaryBin[curLevel++] = i;
+        }
+      }
+      boundaryBin[L] = H - 1;
     }
 
-    // --- bin -> level 的快速 LUT ---
+    // 将bin边界映射为初始代表值（区间中心）
+    for (int k = 0; k < L; ++k) {
+      double a = lo[c] + (boundaryBin[k] + 0.5) * (span[c] / H);
+      double b = lo[c] + (boundaryBin[k + 1] + 0.5) * (span[c] / H);
+      rep[k] = 0.5 * (a + b);
+    }
+
+    // 迭代优化
+    const int maxIter = 25;
+    const double eps = 1e-6;
+    for (int iter = 0; iter < maxIter; ++iter) {
+      double maxDelta = 0.0;
+      // 更新代表值：加权均值
+      for (int k = 0; k < L; ++k) {
+        long long wsum = 0;
+        long long cnt = 0;
+        int b0 = boundaryBin[k];
+        int b1 = boundaryBin[k + 1];
+        for (int b = b0; b <= b1; ++b) {
+          long long h = hist[b];
+          if (!h)
+            continue;
+          double v = lo[c] + (b + 0.5) * (span[c] / H);
+          // 为避免精度损失，累计为双精度
+          wsum += (long long)(h);
+          cnt += 1; // 未用
+        }
+        double newRep;
+        if (wsum == 0) {
+          // 空区间：保持不变
+          newRep = rep[k];
+        } else {
+          // 用更稳定的双循环避免溢出
+          long double num = 0.0L;
+          long double den = 0.0L;
+          for (int b = b0; b <= b1; ++b) {
+            if (hist[b] == 0)
+              continue;
+            long double h = (long double)hist[b];
+            long double v = (long double)(lo[c] + (b + 0.5) * (span[c] / H));
+            num += h * v;
+            den += h;
+          }
+          newRep = (double)(num / (den > 0 ? den : 1.0L));
+        }
+        maxDelta = std::max(maxDelta, std::fabs(newRep - rep[k]));
+        rep[k] = newRep;
+      }
+
+      // 更新边界：相邻代表值的中点（映射回bin索引）
+      for (int k = 1; k < L; ++k) {
+        double mid = 0.5 * (rep[k - 1] + rep[k]);
+        int binIdx = (int)std::floor((mid - lo[c]) / span[c] * H - 0.5);
+        binIdx = clampi(binIdx, 0, H - 1);
+        // 保证边界单调
+        if (binIdx <= boundaryBin[k - 1])
+          binIdx = boundaryBin[k - 1] + 1;
+        if (binIdx >= boundaryBin[k + 1])
+          binIdx = boundaryBin[k + 1] - 1;
+        boundaryBin[k] = binIdx;
+      }
+
+      if (maxDelta < eps)
+        break;
+    }
+
+    // 构建 bin -> level 映射
     std::vector<int> bin2lvl(H, 0);
     int lvl = 0;
     for (int i = 0; i < H; ++i) {
@@ -511,26 +600,8 @@ double *nonUniformQuantizeYUV(const double *imageData, int width, int height,
         ++lvl;
       bin2lvl[i] = lvl;
     }
-#if DEBUG
-    cout << "[nonUniformQuantizeYUV] Channel " << c << " boundaries: ";
-    for (int k = 0; k <= L; ++k) {
-      cout << boundaries[k] << " ";
-    }
-    cout << endl;
-    cout << "[nonUniformQuantizeYUV] Channel " << c << " representatives: ";
-    for (int k = 0; k < L; ++k) {
-      cout << rep[k] << " ";
-    }
-    cout << endl;
-    cout << "[nonUniformQuantizeYUV] Channel " << c << " bin2lvl: ";
-    for (int i = 0; i < H; ++i) {
-      if (i < 20 || i > H - 20 || hist[i] > 0)
-        cout << "[" << i << "]=" << bin2lvl[i] << " ";
-    }
-    cout << endl;
-#endif
 
-    // --- 量化写回 ---
+    // 量化写回
     for (int i = 0; i < size; ++i) {
       double v = imageData[3 * i + c];
       if (!(v == v))
@@ -637,6 +708,7 @@ unsigned char *quantize(unsigned char *imageData, int width, int height, int C,
       const int URange = 1 << Q2; // N_U
       const int VRange = 1 << Q3; // N_V
 
+      // YUV ranges based on BT.601 standard (should match actual conversion output)
       const double Ya = 0.0, Yb = 1.0;
       const double Ua = -0.436, Ub = 0.436;
       const double Va = -0.615, Vb = 0.615;
@@ -747,6 +819,28 @@ unsigned char *quantize(unsigned char *imageData, int width, int height, int C,
   return outData;
 }
 
+unsigned int getPictureError(unsigned char *img1, unsigned char *img2, int width,
+                        int height) {
+  if (!img1 || !img2 || width <= 0 || height <= 0)
+    return -1;
+
+  unsigned int error = 0;
+  for (int i = 0; i < width * height * 3; i++) {
+    int diff = abs((int)img1[i] - (int)img2[i]);
+    error += diff;
+  }
+  return error;
+}
+
+struct TestResult {
+  int N;
+  int C, M, Q1, Q2, Q3;
+  unsigned int error;
+  
+  TestResult(int n, int c, int m, int q1, int q2, int q3, unsigned int err) 
+    : N(n), C(c), M(m), Q1(q1), Q2(q2), Q3(q3), error(err) {}
+};
+
 void testCases() {
   string imagePath = "../../Lena_512_512.rgb";
   int width = 512;
@@ -754,17 +848,80 @@ void testCases() {
   unsigned char *inData = readImageData(imagePath, width, height);
   unsigned char *outData;
 
-  outData = quantize(inData, width, height, 1, 1, 8, 8, 8);
-  saveToRgbFile("out_RGB_equal_888.rgb", outData, width, height);
-  saveToPngFile("out_RGB_equal_888.png", outData, width, height);
+  vector<TestResult> results;
+  unsigned int minError = UINT_MAX;
+  string minMode;
+  int N[3] = {4,6,8};
+  
+  for (int C=1; C<=2; C++) {
+    for (int M=1; M<=2; M++) {
+      for (int i=0; i<3; i++) {
+        for (int j=1; j<=N[i]; j++) {
+          for (int k=N[i]-j-1; k>0; k--) {
+            if (1){
+              int l = N[i] - j - k;
+              int Q1 = j;
+              int Q2 = k;
+              int Q3 = l;
+              outData = quantize(inData, width, height, C, M, Q1, Q2, Q3);
+              unsigned int error = getPictureError(inData, outData, width, height);
+              
+              // Store result
+              results.push_back(TestResult(Q1+Q2+Q3, C, M, Q1, Q2, Q3, error));
+              
+              if (error < minError) {
+                minError = error;
+                minMode = "C=" + to_string(C) + " M=" + to_string(M) + " Q1=" + to_string(Q1) + " Q2=" + to_string(Q2) + " Q3=" + to_string(Q3);
+              }
+              cout << "Testing C=" << C << " M=" << M << " Q1=" << Q1 << " Q2=" << Q2 << " Q3=" << Q3 << " N="<< Q1+Q2+Q3 << endl;
+              cout << "Total absolute error for <"<< C << ", "<< M<<", "<<Q1<<", "<<Q2<<", "<<Q3<<">: "<< error << endl;
 
-  outData = quantize(inData, width, height, 1, 1, 2, 2, 2);
-  saveToRgbFile("out_RGB_equal_222.rgb", outData, width, height);
-  saveToPngFile("out_RGB_equal_222.png", outData, width, height);
+              string mode = (C==1) ? "RGB" : "YUV";
+              mode += (M==1) ? "_equal_" : "_nonuniform_";
+              string fileNameBase = "out_" + mode +"N"+to_string(N[i])+"_"+ to_string(Q1) + to_string(Q2) + to_string(Q3)+"_error_"+to_string(error);
+              // saveToRgbFile(fileNameBase + ".rgb", outData, width, height);
+              // saveToPngFile(fileNameBase + ".png", outData, width, height);
+            }
+          }
+        }
+      }
+    }
+  }
+  
+  // Sort results by N in ascending order
+  sort(results.begin(), results.end(), [](const TestResult& a, const TestResult& b) {
+    return a.N < b.N;
+  });
+  
+  // Save results to table file
+  ofstream tableFile("error_table.txt");
+  if (tableFile.is_open()) {
+    tableFile << "N\t<C,M,Q1,Q2,Q3>\t\tError" << endl;
+    for (const auto& result : results) {
+      tableFile << result.N << "\t<" << result.C << "," << result.M << "," 
+                << result.Q1 << "," << result.Q2 << "," << result.Q3 << ">\t\t" 
+                << result.error << endl;
+    }
+    tableFile.close();
+    cout << "Error table saved to error_table.txt" << endl;
+  } else {
+    cerr << "Error: Could not create error_table.txt" << endl;
+  }
+  
+  cout << "Minimum error found: " << minError << endl;
+  cout << "Achieved with mode: " << minMode << endl;
 
-  outData = quantize(inData, width, height, 2, 2, 2, 3, 3);
-  saveToRgbFile("out_YUV_opt_233.rgb", outData, width, height);
-  saveToPngFile("out_YUV_opt_233.png", outData, width, height);
+  // outData = quantize(inData, width, height, 1, 1, 8, 8, 8);
+  // saveToRgbFile("out_RGB_equal_888.rgb", outData, width, height);
+  // saveToPngFile("out_RGB_equal_888.png", outData, width, height);
+
+  // outData = quantize(inData, width, height, 1, 1, 2, 2, 2);
+  // saveToRgbFile("out_RGB_equal_222.rgb", outData, width, height);
+  // saveToPngFile("out_RGB_equal_222.png", outData, width, height);
+
+  // outData = quantize(inData, width, height, 2, 2, 2, 3, 3);
+  // saveToRgbFile("out_YUV_opt_233.rgb", outData, width, height);
+  // saveToPngFile("out_YUV_opt_233.png", outData, width, height);
 }
 
 void saveToPngFile(string filePath, unsigned char *data, int width,
