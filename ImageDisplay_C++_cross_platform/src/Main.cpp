@@ -461,7 +461,6 @@ double *nonUniformQuantizeYUV(const double *imageData, int width, int height,
     return x < lo ? lo : (x > hi ? hi : x);
   };
 
-  // 每通道的区间与级数
   const double lo[3] = {Ymin, Umin, Vmin};
   const double hi[3] = {Ymax, Umax, Vmax};
   const double span[3] = {Ymax - Ymin, Umax - Umin, Vmax - Vmin};
@@ -474,20 +473,16 @@ double *nonUniformQuantizeYUV(const double *imageData, int width, int height,
   const int levels[3] = {1 << Q1, 1 << Q2, 1 << Q3};
   if (levels[0] <= 1 || levels[1] <= 1 || levels[2] <= 1)
     return nullptr;
-  // 输出
   double *out = (double *)std::malloc(size * 3 * sizeof(double));
   if (!out)
     return nullptr;
 
-  // 分通道处理：0=Y, 1=U, 2=V
   for (int c = 0; c < 3; ++c) {
-    // --- 直方图 ---
     std::vector<int> hist(H, 0);
     for (int i = 0; i < size; ++i) {
       double v = imageData[3 * i + c];
-      // NaN/Inf 处理：落到区间内
       if (!(v == v))
-        v = lo[c]; // NaN
+        v = lo[c];
       if (v < lo[c])
         v = lo[c];
       if (v > hi[c])
@@ -505,12 +500,11 @@ double *nonUniformQuantizeYUV(const double *imageData, int width, int height,
     }
     cout << endl;
 #endif
-    // --- Lloyd-Max 标量量化（基于直方图） ---
+    // Lloyd-Max
     const int L = levels[c];
     std::vector<int> boundaryBin(L + 1, 0);
     std::vector<double> rep(L, 0.0);
 
-    // 初始化：等概率边界
     {
       std::vector<int> cdf(H, 0);
       cdf[0] = hist[0];
@@ -526,19 +520,16 @@ double *nonUniformQuantizeYUV(const double *imageData, int width, int height,
       boundaryBin[L] = H - 1;
     }
 
-    // 将bin边界映射为初始代表值（区间中心）
     for (int k = 0; k < L; ++k) {
       double a = lo[c] + (boundaryBin[k] + 0.5) * (span[c] / H);
       double b = lo[c] + (boundaryBin[k + 1] + 0.5) * (span[c] / H);
       rep[k] = 0.5 * (a + b);
     }
 
-    // 迭代优化
     const int maxIter = 25;
     const double eps = 1e-6;
     for (int iter = 0; iter < maxIter; ++iter) {
       double maxDelta = 0.0;
-      // 更新代表值：加权均值
       for (int k = 0; k < L; ++k) {
         long long wsum = 0;
         long long cnt = 0;
@@ -549,16 +540,13 @@ double *nonUniformQuantizeYUV(const double *imageData, int width, int height,
           if (!h)
             continue;
           double v = lo[c] + (b + 0.5) * (span[c] / H);
-          // 为避免精度损失，累计为双精度
           wsum += (long long)(h);
-          cnt += 1; // 未用
+          cnt += 1;
         }
         double newRep;
         if (wsum == 0) {
-          // 空区间：保持不变
           newRep = rep[k];
         } else {
-          // 用更稳定的双循环避免溢出
           long double num = 0.0L;
           long double den = 0.0L;
           for (int b = b0; b <= b1; ++b) {
@@ -575,12 +563,10 @@ double *nonUniformQuantizeYUV(const double *imageData, int width, int height,
         rep[k] = newRep;
       }
 
-      // 更新边界：相邻代表值的中点（映射回bin索引）
       for (int k = 1; k < L; ++k) {
         double mid = 0.5 * (rep[k - 1] + rep[k]);
         int binIdx = (int)std::floor((mid - lo[c]) / span[c] * H - 0.5);
         binIdx = clampi(binIdx, 0, H - 1);
-        // 保证边界单调
         if (binIdx <= boundaryBin[k - 1])
           binIdx = boundaryBin[k - 1] + 1;
         if (binIdx >= boundaryBin[k + 1])
@@ -592,7 +578,6 @@ double *nonUniformQuantizeYUV(const double *imageData, int width, int height,
         break;
     }
 
-    // 构建 bin -> level 映射
     std::vector<int> bin2lvl(H, 0);
     int lvl = 0;
     for (int i = 0; i < H; ++i) {
@@ -601,7 +586,6 @@ double *nonUniformQuantizeYUV(const double *imageData, int width, int height,
       bin2lvl[i] = lvl;
     }
 
-    // 量化写回
     for (int i = 0; i < size; ++i) {
       double v = imageData[3 * i + c];
       if (!(v == v))
