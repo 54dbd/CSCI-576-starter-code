@@ -187,7 +187,7 @@ double *matrixMultiply(double *A, int hA, int wA, double *B, int hB, int wB) {
   }
   
 
-  double *C = new double[hA * wB];
+  double *C = (double *)malloc(hA * wB * sizeof(double));
 
 
   for (int i = 0; i < hA; i++) {
@@ -296,10 +296,6 @@ unsigned char *rrggbb2rgbrgbrgb(unsigned char *imageData, int width,
 }
 
 double *RGB2YUV(unsigned char *imageData, int width, int height) {
-  unsigned char *outData =
-      (unsigned char *)malloc(width * height * 3 * sizeof(unsigned char));
-  if (!outData)
-    return NULL;
 #if DEBUG
   cout << "Converting from RGB to YUV" << endl;
 #endif
@@ -307,16 +303,11 @@ double *RGB2YUV(unsigned char *imageData, int width, int height) {
   if (!outDataDouble)
     return NULL;
 
-  double *imageDataDouble =
-      (double *)malloc(width * height * 3 * sizeof(double));
-  if (!imageDataDouble)
-    return NULL;
-
   // BT.601 RGB to YUV conversion matrix
   double RGB2YUVMatrix[] = {0.299, 0.587, 0.114,  -0.147, -0.289,
                             0.436, 0.615, -0.515, -0.100};
 
-  imageDataDouble = from255to1(imageData, width, height);
+  double *imageDataDouble = from255to1(imageData, width, height);
 #if DEBUG
   double minY=1e9, maxY=-1e9, minU=1e9, maxU=-1e9, minV=1e9, maxV=-1e9;
   for (int i=0;i<width*height;i++) {
@@ -357,7 +348,7 @@ double *RGB2YUV(unsigned char *imageData, int width, int height) {
     outDataDouble[3 * i] = yuv[0];
     outDataDouble[3 * i + 1] = yuv[1];
     outDataDouble[3 * i + 2] = yuv[2];
-    delete[] yuv;
+    free(yuv);
   }
 #if DEBUG
   minY=1e9, maxY=-1e9, minU=1e9, maxU=-1e9, minV=1e9, maxV=-1e9;
@@ -381,11 +372,6 @@ double *RGB2YUV(unsigned char *imageData, int width, int height) {
 }
 
 unsigned char *YUV2RGB(double *imageData, int width, int height) {
-  unsigned char *outData =
-      (unsigned char *)malloc(width * height * 3 * sizeof(unsigned char));
-  if (!outData)
-    return NULL;
-
   double *outDataDouble = (double *)malloc(width * height * 3 * sizeof(double));
   if (!outDataDouble)
     return NULL;
@@ -439,11 +425,11 @@ unsigned char *YUV2RGB(double *imageData, int width, int height) {
     outDataDouble[3 * i] = r;
     outDataDouble[3 * i + 1] = g;
     outDataDouble[3 * i + 2] = b;
-    delete[] rgb;
+    free(rgb);
   }
-  outData = from1to255(outDataDouble, width, height);
-  // delete [] imageDataDouble;
-  // delete [] outDataDouble;
+  unsigned char *outData = from1to255(outDataDouble, width, height);
+  
+  free(outDataDouble);
 
   return outData;
 }
@@ -654,16 +640,55 @@ unsigned char *nonUniformQuantize(unsigned char *imageData, int width,
     cout << endl;
 #endif
 
-    unsigned char rep[levels[c]];
+    double rep[levels[c]];
     for (int i = 0; i < levels[c]; i++) {
-      rep[i] = (boundaries[i] + boundaries[i + 1]) / 2;
+      long long weightedSum = 0;
+      long long totalCount = 0;
+      for (int j = boundaries[i]; j <= boundaries[i + 1]; j++) {
+        weightedSum += (long long)j * hist[j];
+        totalCount += hist[j];
+      }
+      if (totalCount > 0) {
+        rep[i] = (double)weightedSum / totalCount;
+      } else {
+        rep[i] = (boundaries[i] + boundaries[i + 1]) / 2.0;
+      }
     }
 
+    const int maxIter = 10;
+    const double eps = 1e-3;
+    for (int iter = 0; iter < maxIter; iter++) {
+      double maxDelta = 0.0;
+      
+      for (int k = 0; k < levels[c]; k++) {
+        long long weightedSum = 0;
+        long long totalCount = 0;
+        for (int j = boundaries[k]; j <= boundaries[k + 1]; j++) {
+          weightedSum += (long long)j * hist[j];
+          totalCount += hist[j];
+        }
+        double newRep = (totalCount > 0) ? (double)weightedSum / totalCount : rep[k];
+        maxDelta = max(maxDelta, abs(newRep - rep[k]));
+        rep[k] = newRep;
+      }
+      
+      // 更新边界
+      for (int k = 1; k < levels[c]; k++) {
+        double mid = (rep[k - 1] + rep[k]) / 2.0;
+        int newBoundary = (int)round(mid);
+        newBoundary = max(boundaries[k - 1] + 1, min(boundaries[k + 1] - 1, newBoundary));
+        boundaries[k] = newBoundary;
+      }
+      
+      if (maxDelta < eps) break;
+    }
+
+    // 量化像素值
     for (int i = 0; i < size; i++) {
       unsigned char val = imageData[3 * i + c];
       for (int l = 0; l < levels[c]; l++) {
         if (val >= boundaries[l] && val <= boundaries[l + 1]) {
-          outData[3 * i + c] = rep[l];
+          outData[3 * i + c] = (unsigned char)round(rep[l]);
           break;
         }
       }
@@ -679,18 +704,19 @@ unsigned char *quantize(unsigned char *imageData, int width, int height, int C,
   if (!outData)
     return NULL;
 
-  double *imageDataDouble =
-      (double *)malloc(width * height * 3 * sizeof(double));
-  if (!imageDataDouble)
-    return NULL;
-
-  double *outDataDouble = (double *)malloc(width * height * 3 * sizeof(double));
-  if (!outDataDouble)
-    return NULL;
+  double *imageDataDouble = nullptr;
+  double *outDataDouble = nullptr;
 
   if (C == 2) {
     imageDataDouble = RGB2YUV(imageData, width, height);
     if (M == 1) {
+      outDataDouble = (double *)malloc(width * height * 3 * sizeof(double));
+      if (!outDataDouble) {
+        free(outData);
+        if (imageDataDouble) free(imageDataDouble);
+        return NULL;
+      }
+      
       const int YRange = 1 << Q1; // N_Y
       const int URange = 1 << Q2; // N_U
       const int VRange = 1 << Q3; // N_V
@@ -767,6 +793,14 @@ unsigned char *quantize(unsigned char *imageData, int width, int height, int C,
     }
 #endif
     outData = YUV2RGB(outDataDouble, width, height);
+    
+    // 清理YUV处理中的临时内存
+    if (imageDataDouble) {
+      free(imageDataDouble);
+    }
+    if (outDataDouble) {
+      free(outDataDouble);
+    }
 
   } else {
     if (M == 1) {
@@ -837,6 +871,15 @@ void testCases() {
   unsigned char *inData = readImageData(imagePath, width, height);
   unsigned char *outData;
 
+  // 创建文件夹
+  vector<string> folders = {"C1M1", "C2M2", "C1M2", "C2M1", "example"};
+  for (const string& folder : folders) {
+    if (!fs::exists(folder)) {
+      fs::create_directory(folder);
+      cout << "Created folder: " << folder << endl;
+    }
+  }
+
   vector<TestResult> results;
   unsigned int minError = UINT_MAX;
   string minMode;
@@ -868,8 +911,26 @@ void testCases() {
               string mode = (C==1) ? "RGB" : "YUV";
               mode += (M==1) ? "_equal_" : "_nonuniform_";
               string fileNameBase = "out_" + mode +"N"+to_string(N[i])+"_"+ to_string(Q1) + to_string(Q2) + to_string(Q3)+"_error_"+to_string(error);
-              // saveToRgbFile(fileNameBase + ".rgb", outData, width, height);
-              // saveToPngFile(fileNameBase + ".png", outData, width, height);
+              
+              // 确定目标文件夹
+              string targetFolder;
+              if (C == 1 && M == 1) targetFolder = "C1M1";
+              else if (C == 2 && M == 2) targetFolder = "C2M2";
+              else if (C == 1 && M == 2) targetFolder = "C1M2";
+              else if (C == 2 && M == 1) targetFolder = "C2M1";
+              
+              // 保存到对应文件夹
+              string pngPath = targetFolder + "/" + fileNameBase + ".png";
+              saveToPngFile(pngPath, outData, width, height);
+              
+              // 如果是N=4，额外保存到example文件夹
+              if (N[i] == 4) {
+                string examplePngPath = "example/" + fileNameBase + ".png";
+                saveToPngFile(examplePngPath, outData, width, height);
+              }
+              
+              // 释放内存
+              free(outData);
             }
           }
         }
@@ -916,7 +977,7 @@ void testCases() {
 void saveToPngFile(string filePath, unsigned char *data, int width,
                    int height) {
   wxImage image;
-  image.SetData(data, width, height, false);
+  image.SetData(data, width, height, true);  // 使用 static_data = true
   if (!image.SaveFile(filePath, wxBITMAP_TYPE_PNG)) {
     cerr << "Error Saving PNG File" << endl;
     exit(1);
