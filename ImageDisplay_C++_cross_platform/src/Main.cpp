@@ -127,8 +127,8 @@ MyFrame::MyFrame(const wxString &title, string imagePath, int C, int M, int Q1,
 
   // Modify the height and width values here to read and display an image with
   // different dimensions.
-  width = 512;
-  height = 512;
+  width = 352;
+  height = 288;
   unsigned char *outData;
   unsigned char *inData = readImageData(imagePath, width, height);
   if (C == 0) {
@@ -343,9 +343,11 @@ double *RGB2YUV(unsigned char *imageData, int width, int height) {
     if (r < 0.0) r = 0.0; else if (r > 1.0) r = 1.0;
     if (g < 0.0) g = 0.0; else if (g > 1.0) g = 1.0;
     if (b < 0.0) b = 0.0; else if (b > 1.0) b = 1.0;
-    
+
+    double B[] = {r,g,b};
+
     double *yuv =
-        matrixMultiply(RGB2YUVMatrix, 3, 3, (double[]){r, g, b}, 3, 1);
+        matrixMultiply(RGB2YUVMatrix, 3, 3, B, 3, 1);
 #if DEBUG
     if (i < 10) {
       cout << "[RGB2YUV] Pixel " << i << ": R=" << r << " G=" << g << " B=" << b
@@ -416,9 +418,10 @@ unsigned char *YUV2RGB(double *imageData, int width, int height) {
       cout << "[YUV2RGB] Clamped Y=" << y << " U=" << u << " V=" << v << endl;
     }
 #endif
+    double B[] = {y,u,v};
 
     double *rgb =
-        matrixMultiply(YUV2RGBMatrix, 3, 3, (double[]){y, u, v}, 3, 1);
+        matrixMultiply(YUV2RGBMatrix, 3, 3, B, 3, 1);
 #if DEBUG
     if (i < 10) {
       cout << "[YUV2RGB] Pixel " << i << ": Y=" << y << " U=" << u << " V=" << v
@@ -809,10 +812,12 @@ unsigned int getPictureError(unsigned char *img1, unsigned char *img2, int width
     return -1;
 
   unsigned int error = 0;
+
   for (int i = 0; i < width * height * 3; i++) {
-    int diff = abs((int)img1[i] - (int)img2[i]);
+    int diff = pow(abs((int)img1[i] - (int)img2[i]),2);
     error += diff;
   }
+  error = error / (width * height * 3);
   return error;
 }
 
@@ -826,9 +831,9 @@ struct TestResult {
 };
 
 void testCases() {
-  string imagePath = "../../Lena_512_512.rgb";
-  int width = 512;
-  int height = 512;
+  string imagePath = "./mountain_352x288.rgb";
+  int width = 352;
+  int height = 288;
   unsigned char *inData = readImageData(imagePath, width, height);
   unsigned char *outData;
 
